@@ -45,10 +45,12 @@ STRING_CACHE *defines_for_file_sc;
 STRING_CACHE **defines_for_module_sc;
 STRING_CACHE *modules_inputs_sc;
 STRING_CACHE *modules_outputs_sc;
+STRING_CACHE *modules_inouts_sc;
 //for function
 STRING_CACHE **defines_for_function_sc;
 STRING_CACHE *functions_inputs_sc;
 STRING_CACHE *functions_outputs_sc;
+STRING_CACHE *functions_inouts_sc;
 
 STRING_CACHE *module_names_to_idx;
 
@@ -264,8 +266,10 @@ void init_parser_for_file()
 	/* create string caches to hookup PORTS with INPUT and OUTPUTs.  This is made per module and will be cleaned and remade at next_module */
 	modules_inputs_sc = sc_new_string_cache();
 	modules_outputs_sc = sc_new_string_cache();
+	modules_inouts_sc = sc_new_string_cache();
 	functions_inputs_sc = sc_new_string_cache();
 	functions_outputs_sc = sc_new_string_cache();
+	functions_inouts_sc = sc_new_string_cache();
 }
 
 /*---------------------------------------------------------------------------------------------
@@ -513,6 +517,13 @@ ast_node_t *markAndProcessSymbolListWith(ids top_type, ids id, ast_node_t *symbo
 				            symbol_list->children[i]->children[0] = (ast_node_t*)modules_outputs_sc->data[sc_spot];
 				            found_match = TRUE;
 			            }
+						if ((found_match == FALSE) && ((sc_spot = sc_lookup_string(modules_inouts_sc, symbol_list->children[i]->children[0]->types.identifier)) != -1))
+			            {
+				            symbol_list->children[i]->types.variable.is_inout = TRUE;
+							free_whole_tree(symbol_list->children[i]->children[0]);
+				            symbol_list->children[i]->children[0] = (ast_node_t*)modules_inouts_sc->data[sc_spot];
+				            found_match = TRUE;
+			            }
 
 			            if (found_match == FALSE)
 			            {
@@ -569,6 +580,13 @@ ast_node_t *markAndProcessSymbolListWith(ids top_type, ids id, ast_node_t *symbo
 		            case INOUT:
 			            symbol_list->children[i]->types.variable.is_inout = TRUE;
 			            error_message(PARSE_ERROR, symbol_list->children[i]->children[0]->line_number, current_parse_file, "Odin does not handle inouts (%s)\n", symbol_list->children[i]->children[0]->types.identifier);
+						// TODO Alex
+						if ((sc_spot = sc_add_string(modules_inouts_sc, symbol_list->children[i]->children[0]->types.identifier)) == -1)
+			            {
+				            error_message(PARSE_ERROR, symbol_list->children[i]->children[0]->line_number, current_parse_file, "Module already has inout with this name %s\n", symbol_list->children[i]->children[0]->types.identifier);
+			            }
+			            /* store the data which is an idx here */
+			            modules_inouts_sc->data[sc_spot] = (void*)symbol_list->children[i];
 			            break;
 		            case WIRE:
 			            symbol_list->children[i]->types.variable.is_wire = TRUE;
@@ -677,6 +695,14 @@ ast_node_t *markAndProcessSymbolListWith(ids top_type, ids id, ast_node_t *symbo
 					        found_match = TRUE;
 				        }
 
+						if ((found_match == FALSE) && ((sc_spot = sc_lookup_string(functions_inouts_sc, symbol_list->children[i]->children[0]->types.identifier)) != -1))
+			            {
+				            symbol_list->children[i]->types.variable.is_inout = TRUE;
+							free_whole_tree(symbol_list->children[i]->children[0]);
+				            symbol_list->children[i]->children[0] = (ast_node_t*)functions_inouts_sc->data[sc_spot];
+				            found_match = TRUE;
+			            }
+
 				        if (found_match == FALSE)
 				        {
 					        error_message(PARSE_ERROR, symbol_list->children[i]->line_number, current_parse_file, "No matching input declaration for port %s\n", symbol_list->children[i]->children[0]->types.identifier);
@@ -732,7 +758,14 @@ ast_node_t *markAndProcessSymbolListWith(ids top_type, ids id, ast_node_t *symbo
 			        case INOUT:
 				        symbol_list->children[i]->types.variable.is_inout = TRUE;
 				        error_message(PARSE_ERROR, symbol_list->children[i]->children[0]->line_number, current_parse_file, "Odin does not handle inouts (%s)\n", symbol_list->children[i]->children[0]->types.identifier);
-				        break;
+				        // TODO Alex
+						if ((sc_spot = sc_add_string(functions_inouts_sc, symbol_list->children[i]->children[0]->types.identifier)) == -1)
+			            {
+				            error_message(PARSE_ERROR, symbol_list->children[i]->children[0]->line_number, current_parse_file, "Module already has inout with this name %s\n", symbol_list->children[i]->children[0]->types.identifier);
+			            }
+			            /* store the data which is an idx here */
+			            functions_inouts_sc->data[sc_spot] = (void*)symbol_list->children[i];
+						break;
 			        case WIRE:
 				        symbol_list->children[i]->types.variable.is_wire = TRUE;
 				        break;
@@ -795,10 +828,12 @@ ast_node_t *newPartSelectRangeRef(char *id, ast_node_t *expression1, ast_node_t 
 
 	/* Try to find the original array to check low/high indices */
 	if ((sc_spot = sc_lookup_string(modules_inputs_sc, id)) == -1 &&
-		(sc_spot = sc_lookup_string(modules_outputs_sc, id)) == -1){
+		(sc_spot = sc_lookup_string(modules_outputs_sc, id)) == -1 &&
+		(sc_spot = sc_lookup_string(modules_inouts_sc, id)) == -1){
 		error_message(PARSE_ERROR, line_number, current_parse_file, "Could not find variable %s", id);
 		return nullptr;
 	}
+	/* TODO Alex add some inout stuff here? */
 	ast_node_t *original_range = (ast_node_t *) modules_inputs_sc->data[sc_spot];;
 	long upper_limit = original_range->children[1]->types.number.value;
 	long bottom_limit = original_range->children[2]->types.number.value;
@@ -1628,9 +1663,11 @@ void next_function()
 	/* old ones are done so clean */
 	sc_free_string_cache(functions_inputs_sc);
 	sc_free_string_cache(functions_outputs_sc);
+	sc_free_string_cache(functions_inouts_sc);
 	/* make for next function */
 	functions_inputs_sc = sc_new_string_cache();
 	functions_outputs_sc = sc_new_string_cache();
+	functions_inouts_sc = sc_new_string_cache();
 }
 /*---------------------------------------------------------------------------------------------
  * (function: next_module)
@@ -1657,9 +1694,11 @@ void next_module()
 	/* old ones are done so clean */
 	sc_free_string_cache(modules_inputs_sc);
 	sc_free_string_cache(modules_outputs_sc);
+	sc_free_string_cache(modules_inouts_sc);
 	/* make for next module */
 	modules_inputs_sc = sc_new_string_cache();
 	modules_outputs_sc = sc_new_string_cache();
+	modules_inouts_sc = sc_new_string_cache();
 }
 
 /*--------------------------------------------------------------------------

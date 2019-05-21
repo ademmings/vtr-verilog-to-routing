@@ -186,6 +186,7 @@ void create_param_table_for_module(ast_node_t* parent_parameter_list, ast_node_t
 
 					if ((var_declare->types.variable.is_input) ||
 						(var_declare->types.variable.is_output) ||
+						(var_declare->types.variable.is_inout) ||
 						(var_declare->types.variable.is_reg) ||
 						(var_declare->types.variable.is_integer) ||
 						(var_declare->types.variable.is_wire)) continue;
@@ -1740,6 +1741,7 @@ void create_symbol_table_for_module(ast_node_t* module_items, char * /*module_na
 					oassert(module_items->children[i]->children[j]->type == VAR_DECLARE);
 					oassert(	(var_declare->types.variable.is_input) ||
 						(var_declare->types.variable.is_output) ||
+						(var_declare->types.variable.is_inout) ||
 						(var_declare->types.variable.is_reg) ||
 						(var_declare->types.variable.is_integer) ||
 						(var_declare->types.variable.is_wire));
@@ -1777,6 +1779,13 @@ void create_symbol_table_for_module(ast_node_t* module_items, char * /*module_na
 								((ast_node_t*)local_symbol_table_sc->data[sc_spot])->types.variable.initial_value = initial_value;
 							}
 						}
+						else if (var_declare->types.variable.is_inout)
+						{
+
+							/* TODO Alex what to check for inouts??? */
+
+						}
+
 						else if ((var_declare->types.variable.is_reg) || (var_declare->types.variable.is_wire) || (var_declare->types.variable.is_integer))
 						{
 							/* copy the output status over */
@@ -1890,6 +1899,7 @@ void create_symbol_table_for_function(ast_node_t* function_items, char * /*funct
 					oassert(function_items->children[i]->children[j]->type == VAR_DECLARE);
 					oassert(	(var_declare->types.variable.is_input) ||
 						(var_declare->types.variable.is_output) ||
+						(var_declare->types.variable.is_inout) ||
 						(var_declare->types.variable.is_reg) || (var_declare->types.variable.is_integer) ||
 						(var_declare->types.variable.is_wire));
 
@@ -1926,6 +1936,12 @@ void create_symbol_table_for_function(ast_node_t* function_items, char * /*funct
 								((ast_node_t*)function_local_symbol_table_sc->data[sc_spot])->types.variable.is_initialized = TRUE;
 								((ast_node_t*)function_local_symbol_table_sc->data[sc_spot])->types.variable.initial_value = initial_value;
 							}
+						}
+						else if (var_declare->types.variable.is_inout)
+						{
+
+							/* TODO Alex what to check for inouts ??? */
+
 						}
 						else if ((var_declare->types.variable.is_reg) || (var_declare->types.variable.is_wire) || (var_declare->types.variable.is_integer))
 						{
