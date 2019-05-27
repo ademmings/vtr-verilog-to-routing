@@ -69,7 +69,6 @@ using namespace std;
 #include "tatum/report/graphviz_dot_writer.hpp"
 
 #define AAPACK_MAX_FEASIBLE_BLOCK_ARRAY_SIZE 30      /* This value is used to determine the max size of the priority queue for candidates that pass the early filter legality test but not the more detailed routing test */
-#define AAPACK_MAX_NET_SINKS_IGNORE 64				/* The packer looks at all sinks of a net when deciding what next candidate block to pack, for high-fanout nets, this is too runtime costly for marginal benefit, thus ignore those high fanout nets */
 #define AAPACK_MAX_HIGH_FANOUT_EXPLORE 10			/* For high-fanout nets that are ignored, consider a maximum of this many sinks, must be less than AAPACK_MAX_FEASIBLE_BLOCK_ARRAY_SIZE */
 #define AAPACK_MAX_TRANSITIVE_FANOUT_EXPLORE 4		/* When investigating transitive fanout connections in packing, this is the highest fanout net that will be explored */
 #define AAPACK_MAX_TRANSITIVE_EXPLORE 40			/* When investigating transitive fanout connections in packing, consider a maximum of this many molecules, must be less than AAPACK_MAX_FEASIBLE_BLOCK_ARRAY_SIZE */
@@ -95,7 +94,7 @@ enum e_net_relation_to_clustered_block {
 };
 
 enum e_detailed_routing_stages {
-	E_DETAILED_ROUTE_AT_END_ONLY = 0, E_DETAILED_ROUTE_FOR_EACH_ATOM, E_DETAILED_ROUTE_END
+	E_DETAILED_ROUTE_AT_END_ONLY = 0, E_DETAILED_ROUTE_FOR_EACH_ATOM, E_DETAILED_ROUTE_INVALID
 };
 
 
@@ -116,6 +115,7 @@ struct t_molecule_stats {
     int num_used_ext_inputs = 0;   //Number of *used external* input pins across all primitives in molecule
     int num_used_ext_outputs = 0;  //Number of *used external* output pins across all primitives in molecule
 };
+
 
 /* Keeps a linked list of the unclustered blocks to speed up looking for *
  * unclustered blocks with a certain number of *external* inputs.        *
@@ -217,7 +217,8 @@ static void mark_and_update_partial_gain(const AtomNetId inet, enum e_gain_updat
 		bool connection_driven,
 		enum e_net_relation_to_clustered_block net_relation_to_clustered_block,
         const SetupTimingInfo& timing_info,
-        const std::unordered_set<AtomNetId>& is_global);
+        const std::unordered_set<AtomNetId>& is_global,
+        const int high_fanout_net_threshold);
 
 static void update_total_gain(float alpha, float beta, bool timing_driven,
 		bool connection_driven, t_pb *pb);
@@ -229,6 +230,7 @@ static void update_cluster_stats( const t_pack_molecule *molecule,
         const bool global_clocks,
 		const float alpha, const float beta, const bool timing_driven,
 		const bool connection_driven,
+        const int high_fanout_net_threshold,
         const SetupTimingInfo& timing_info);
 
 static void start_new_cluster(
@@ -257,7 +259,8 @@ static t_pack_molecule* get_highest_gain_molecule(
 		const enum e_gain_type gain_mode,
 		t_cluster_placement_stats *cluster_placement_stats_ptr,
 		vtr::vector<ClusterBlockId,std::vector<AtomNetId>> &clb_inter_blk_nets,
-		const ClusterBlockId cluster_index);
+		const ClusterBlockId cluster_index,
+        bool prioritize_transitive_connectivity);
 
 void add_cluster_molecule_candidates_by_connectivity_and_timing(t_pb* cur_pb,
                                                                 t_cluster_placement_stats *cluster_placement_stats_ptr,
@@ -277,6 +280,7 @@ static t_pack_molecule* get_molecule_for_cluster(
 		t_pb *cur_pb,
         const std::multimap<AtomBlockId,t_pack_molecule*>& atom_molecules,
 		const bool allow_unrelated_clustering,
+		const bool prioritize_transitive_connectivity,
 		int *num_unrelated_clustering_attempts,
 		t_cluster_placement_stats *cluster_placement_stats_ptr,
 		vtr::vector<ClusterBlockId,std::vector<AtomNetId>> &clb_inter_blk_nets,
@@ -476,9 +480,7 @@ std::map<t_type_ptr,size_t> do_clustering(const t_packer_opts& packer_opts, cons
 	while (istart != nullptr) {
 		is_cluster_legal = false;
 		savedseedindex = seedindex;
-		for (detailed_routing_stage = (int)E_DETAILED_ROUTE_AT_END_ONLY; !is_cluster_legal && detailed_routing_stage != (int)E_DETAILED_ROUTE_END; detailed_routing_stage++) {
-			/* start a new cluster */
-
+		for (detailed_routing_stage = (int)E_DETAILED_ROUTE_AT_END_ONLY; !is_cluster_legal && detailed_routing_stage != (int)E_DETAILED_ROUTE_INVALID; detailed_routing_stage++) {
 			ClusterBlockId clb_index(num_clb);
 
             VTR_LOGV(verbosity > 2, "Complex block %d:\n", num_clb);
@@ -510,6 +512,7 @@ std::map<t_type_ptr,size_t> do_clustering(const t_packer_opts& packer_opts, cons
                     packer_opts.global_clocks,
                     packer_opts.alpha, packer_opts.beta,
                     packer_opts.timing_driven, packer_opts.connection_driven,
+                    packer_opts.high_fanout_threshold,
                     *timing_info);
 			num_clb++;
 
@@ -524,6 +527,7 @@ std::map<t_type_ptr,size_t> do_clustering(const t_packer_opts& packer_opts, cons
 					cluster_ctx.clb_nlist.block_pb(clb_index),
                     atom_molecules,
                     allow_unrelated_clustering,
+                    packer_opts.prioritize_transitive_connectivity,
 					&num_unrelated_clustering_attempts,
 					cur_cluster_placement_stats_ptr,
 					clb_inter_blk_nets,
@@ -568,6 +572,7 @@ std::map<t_type_ptr,size_t> do_clustering(const t_packer_opts& packer_opts, cons
 							cluster_ctx.clb_nlist.block_pb(clb_index),
                             atom_molecules,
                             allow_unrelated_clustering,
+                            packer_opts.prioritize_transitive_connectivity,
 							&num_unrelated_clustering_attempts,
 							cur_cluster_placement_stats_ptr,
 							clb_inter_blk_nets,
@@ -590,6 +595,7 @@ std::map<t_type_ptr,size_t> do_clustering(const t_packer_opts& packer_opts, cons
                         is_clock, //Set of all global signals (currently clocks)
 						packer_opts.global_clocks, packer_opts.alpha, packer_opts.beta, packer_opts.timing_driven,
 						packer_opts.connection_driven,
+                        packer_opts.high_fanout_threshold,
                         *timing_info);
 				num_unrelated_clustering_attempts = 0;
 
@@ -600,6 +606,7 @@ std::map<t_type_ptr,size_t> do_clustering(const t_packer_opts& packer_opts, cons
 						cluster_ctx.clb_nlist.block_pb(clb_index),
                         atom_molecules,
                         allow_unrelated_clustering,
+                        packer_opts.prioritize_transitive_connectivity,
 						&num_unrelated_clustering_attempts,
 						cur_cluster_placement_stats_ptr,
 						clb_inter_blk_nets,
@@ -609,7 +616,14 @@ std::map<t_type_ptr,size_t> do_clustering(const t_packer_opts& packer_opts, cons
             VTR_LOGV(verbosity == 2, "\n");
 
 			if (detailed_routing_stage == (int)E_DETAILED_ROUTE_AT_END_ONLY) {
-				is_cluster_legal = try_intra_lb_route(router_data, packer_opts.pack_verbosity);
+				/* is_mode_conflict does not affect this stage. It is needed when trying to route the packed clusters.
+				 *
+				 * It holds a flag that is used to verify whether try_intra_lb_route ended in a mode conflict issue.
+				 * If the value is TRUE the cluster has to be repacked, and its internal pb_graph_nodes will have more restrict choices
+				 * for what regards the mode that has to be selected
+				 */
+				t_mode_selection_status mode_status;
+				is_cluster_legal = try_intra_lb_route(router_data, packer_opts.pack_verbosity, &mode_status);
 				if (is_cluster_legal) {
                     VTR_LOGV(verbosity > 2, "\tPassed route at end.\n");
 				} else {
@@ -1169,10 +1183,46 @@ static enum e_block_pack_status try_pack_molecule(
 				}
 			}
 			if (block_pack_status == BLK_PASSED) {
-				/* Try to route if heuristic is to route for every atom
-					Skip routing if heuristic is to route at the end of packing complex block
-				*/
-				if (detailed_routing_stage == (int)E_DETAILED_ROUTE_FOR_EACH_ATOM && !try_intra_lb_route(router_data, verbosity)) {
+				/*
+				 * during the clustering step of `do_clustering`, `detailed_routing_stage` is incremented at each iteration until it a cluster
+				 * is correctly generated or `detailed_routing_stage` assumes an invalid value (E_DETAILED_ROUTE_INVALID).
+				 * depending on its value we have different behaviors:
+				 *	- E_DETAILED_ROUTE_AT_END_ONLY:	Skip routing if heuristic is to route at the end of packing complex block.
+				 *	- E_DETAILED_ROUTE_FOR_EACH_ATOM: Try to route if heuristic is to route for every atom. If the clusterer arrives at this stage,
+				 *	                                  it means that more checks have to be performed as the previous stage failed to generate a new cluster.
+				 *
+				 * mode_status is a data structure containing the status of the mode selection. Its members are:
+				 *  - bool is_mode_conflict
+				 *  - bool try_expand_all_modes
+				 *  - bool expand_all_modes
+				 *
+				 * is_mode_conflict affects this stage. Its value determines whether the cluster failed to pack after a mode conflict issue.
+				 * It holds a flag that is used to verify whether try_intra_lb_route ended in a mode conflict issue.
+				 *
+				 * Until is_mode_conflict is set to FALSE by try_intra_lb_route, the loop re-iterates. If all the available modes are exhausted
+				 * an error will be thrown during mode conflicts checks (this to prevent infinite loops).
+				 *
+				 * If the value is TRUE the cluster has to be re-routed, and its internal pb_graph_nodes will have more restrict choices
+				 * for what regards the mode that has to be selected.
+				 *
+				 * is_mode_conflict is initially set to TRUE, and, unless a mode conflict is found, it is set to false in `try_intra_lb_route`.
+				 *
+				 * try_expand_all_modes is set if the node expansion failed to find a valid routing path. The clusterer tries to find another route
+				 * by using all the modes during node expansion.
+				 *
+				 * expand_all_modes is used to enable the expansion of all the nodes using all the possible modes.
+				 */
+				t_mode_selection_status mode_status;
+				bool is_routed = false;
+				bool do_detailed_routing_stage = detailed_routing_stage == (int)E_DETAILED_ROUTE_FOR_EACH_ATOM;
+				if (do_detailed_routing_stage) {
+					do {
+						reset_intra_lb_route(router_data);
+						is_routed = try_intra_lb_route(router_data, verbosity, &mode_status);
+					} while (do_detailed_routing_stage && mode_status.is_mode_issue());
+				}
+
+				if (do_detailed_routing_stage && is_routed == false) {
 					/* Cannot pack */
                     VTR_LOGV(verbosity > 4, "\t\t\tFAILED Detailed Routing Legality\n");
 					block_pack_status = BLK_FAILED_ROUTE;
@@ -1550,7 +1600,8 @@ static void mark_and_update_partial_gain(const AtomNetId net_id, enum e_gain_upd
 		bool connection_driven,
 		enum e_net_relation_to_clustered_block net_relation_to_clustered_block,
         const SetupTimingInfo& timing_info,
-        const std::unordered_set<AtomNetId>& is_global) {
+        const std::unordered_set<AtomNetId>& is_global,
+        const int high_fanout_net_threshold) {
 
 	/* Updates the marked data structures, and if gain_flag is GAIN,  *
 	 * the gain when an atom block is added to a cluster.  The        *
@@ -1563,7 +1614,7 @@ static void mark_and_update_partial_gain(const AtomNetId net_id, enum e_gain_upd
     auto& atom_ctx = g_vpr_ctx.atom();
 	t_pb* cur_pb = atom_ctx.lookup.atom_pb(clustered_blk_id)->parent_pb;
 
-	if (atom_ctx.nlist.net_sinks(net_id).size() > AAPACK_MAX_NET_SINKS_IGNORE) {
+	if (int(atom_ctx.nlist.net_sinks(net_id).size()) > high_fanout_net_threshold) {
 		/* Optimization: It can be too runtime costly for marking all sinks for
          * a high fanout-net that probably has no hope of ever getting packed,
          * thus ignore those high fanout nets */
@@ -1698,6 +1749,7 @@ static void update_cluster_stats( const t_pack_molecule *molecule,
         const bool global_clocks,
 		const float alpha, const float beta, const bool timing_driven,
 		const bool connection_driven,
+        const int high_fanout_net_threshold,
         const SetupTimingInfo& timing_info) {
 
 	/* Updates cluster stats such as gain, used pins, and clock structures.  */
@@ -1750,13 +1802,15 @@ static void update_cluster_stats( const t_pack_molecule *molecule,
                         timing_driven,
                         connection_driven, OUTPUT,
                         timing_info,
-                        is_global);
+                        is_global,
+                        high_fanout_net_threshold);
             } else {
                 mark_and_update_partial_gain(net_id, NO_GAIN, blk_id,
                         timing_driven,
                         connection_driven, OUTPUT,
                         timing_info,
-                        is_global);
+                        is_global,
+                        high_fanout_net_threshold);
             }
         }
 
@@ -1767,7 +1821,8 @@ static void update_cluster_stats( const t_pack_molecule *molecule,
                     timing_driven, connection_driven,
                     INPUT,
                     timing_info,
-                    is_global);
+                    is_global,
+                    high_fanout_net_threshold);
         }
 
         /* Finally Clocks */
@@ -1777,12 +1832,14 @@ static void update_cluster_stats( const t_pack_molecule *molecule,
                 mark_and_update_partial_gain(net_id, NO_GAIN, blk_id,
                         timing_driven, connection_driven, INPUT,
                         timing_info,
-                        is_global);
+                        is_global,
+                        high_fanout_net_threshold);
             } else {
                 mark_and_update_partial_gain(net_id, GAIN, blk_id,
                         timing_driven, connection_driven, INPUT,
                         timing_info,
-                        is_global);
+                        is_global,
+                        high_fanout_net_threshold);
             }
         }
 
@@ -1956,7 +2013,8 @@ static t_pack_molecule *get_highest_gain_molecule(
 		const enum e_gain_type gain_mode,
 		t_cluster_placement_stats *cluster_placement_stats_ptr,
 		vtr::vector<ClusterBlockId,std::vector<AtomNetId>> &clb_inter_blk_nets,
-		const ClusterBlockId cluster_index) {
+		const ClusterBlockId cluster_index,
+        bool prioritize_transitive_connectivity) {
 
 	/* This routine populates a list of feasible blocks outside the cluster then returns the best one for the list    *
 	 * not currently in a cluster and satisfies the feasibility     *
@@ -1973,15 +2031,27 @@ static t_pack_molecule *get_highest_gain_molecule(
         add_cluster_molecule_candidates_by_connectivity_and_timing(cur_pb, cluster_placement_stats_ptr, atom_molecules);
     }
 
-	// 2. Find unpacked molecule based on transitive connections (eg. 2 hops away) with current cluster
-	if(cur_pb->pb_stats->num_feasible_blocks == 0 && cur_pb->pb_stats->explore_transitive_fanout) {
-        add_cluster_molecule_candidates_by_transitive_connectivity(cur_pb, cluster_placement_stats_ptr, atom_molecules, clb_inter_blk_nets, cluster_index);
-	}
+    if (prioritize_transitive_connectivity) {
+        // 2. Find unpacked molecule based on transitive connections (eg. 2 hops away) with current cluster
+        if(cur_pb->pb_stats->num_feasible_blocks == 0 && cur_pb->pb_stats->explore_transitive_fanout) {
+            add_cluster_molecule_candidates_by_transitive_connectivity(cur_pb, cluster_placement_stats_ptr, atom_molecules, clb_inter_blk_nets, cluster_index);
+        }
 
-	// 3. Find unpacked molecule based on weak connectedness (connected by high fanout nets) with current cluster
-	if(cur_pb->pb_stats->num_feasible_blocks == 0 && cur_pb->pb_stats->tie_break_high_fanout_net) {
-        add_cluster_molecule_candidates_by_highfanout_connectivity(cur_pb, cluster_placement_stats_ptr, atom_molecules);
-	}
+        // 3. Find unpacked molecule based on weak connectedness (connected by high fanout nets) with current cluster
+        if(cur_pb->pb_stats->num_feasible_blocks == 0 && cur_pb->pb_stats->tie_break_high_fanout_net) {
+            add_cluster_molecule_candidates_by_highfanout_connectivity(cur_pb, cluster_placement_stats_ptr, atom_molecules);
+        }
+    } else { //Reverse order
+        // 3. Find unpacked molecule based on weak connectedness (connected by high fanout nets) with current cluster
+        if(cur_pb->pb_stats->num_feasible_blocks == 0 && cur_pb->pb_stats->tie_break_high_fanout_net) {
+            add_cluster_molecule_candidates_by_highfanout_connectivity(cur_pb, cluster_placement_stats_ptr, atom_molecules);
+        }
+
+        // 2. Find unpacked molecule based on transitive connections (eg. 2 hops away) with current cluster
+        if(cur_pb->pb_stats->num_feasible_blocks == 0 && cur_pb->pb_stats->explore_transitive_fanout) {
+            add_cluster_molecule_candidates_by_transitive_connectivity(cur_pb, cluster_placement_stats_ptr, atom_molecules, clb_inter_blk_nets, cluster_index);
+        }
+    }
 
 	/* Grab highest gain molecule */
 	t_pack_molecule* molecule = nullptr;
@@ -2137,6 +2207,7 @@ static t_pack_molecule *get_molecule_for_cluster(
 		t_pb *cur_pb,
         const std::multimap<AtomBlockId,t_pack_molecule*>& atom_molecules,
 		const bool allow_unrelated_clustering,
+		const bool prioritize_transitive_connectivity,
 		int *num_unrelated_clustering_attempts,
 		t_cluster_placement_stats *cluster_placement_stats_ptr,
 		vtr::vector<ClusterBlockId,std::vector<AtomNetId>> &clb_inter_blk_nets,
@@ -2153,7 +2224,7 @@ static t_pack_molecule *get_molecule_for_cluster(
 	/* If cannot pack into primitive, try packing into cluster */
 
 	auto best_molecule = get_highest_gain_molecule(cur_pb, atom_molecules,
-			NOT_HILL_CLIMBING, cluster_placement_stats_ptr, clb_inter_blk_nets, cluster_index);
+			NOT_HILL_CLIMBING, cluster_placement_stats_ptr, clb_inter_blk_nets, cluster_index, prioritize_transitive_connectivity);
 
 	/* If no blocks have any gain to the current cluster, the code above      *
 	 * will not find anything.  However, another atom block with no inputs in *
@@ -2312,7 +2383,7 @@ static t_molecule_stats calc_molecule_stats(const t_pack_molecule* molecule) {
 
         ++molecule_stats.num_blocks; //Record number of valid blocks in molecule
 
-        
+
         const t_model* model = atom_ctx.nlist.block_model(blk);
 
         for (const t_model_ports* input_port = model->inputs; input_port != nullptr; input_port = input_port->next) {
@@ -2329,9 +2400,9 @@ static t_molecule_stats calc_molecule_stats(const t_pack_molecule* molecule) {
     std::set<AtomBlockId> molecule_atoms(molecule->atom_block_ids.begin(), molecule->atom_block_ids.end());
     for (auto blk : molecule->atom_block_ids) {
         if (!blk) continue;
-        
+
         for (auto pin : atom_ctx.nlist.block_pins(blk)) {
-            
+
             auto net = atom_ctx.nlist.pin_net(pin);
 
             auto pin_type = atom_ctx.nlist.pin_type(pin);
@@ -2419,7 +2490,7 @@ static std::vector<AtomBlockId> initialize_seed_atoms(const e_cluster_seed seed_
 
     } else if (seed_type == e_cluster_seed::MAX_INPUTS) {
 
-        //By number of used molecule input pins 
+        //By number of used molecule input pins
         for (auto blk : atom_ctx.nlist.blocks()) {
 
             int max_molecule_inputs = 0;
@@ -2483,7 +2554,7 @@ static std::vector<AtomBlockId> initialize_seed_atoms(const e_cluster_seed seed_
                     molecule_pins = molecule_stats.num_pins;
                 } else {
                     VTR_ASSERT(seed_type == e_cluster_seed::MAX_INPUT_PINS);
-                    //Input pins only 
+                    //Input pins only
                     molecule_pins = molecule_stats.num_input_pins;
                 }
 
