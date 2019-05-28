@@ -49,6 +49,7 @@ struct t_options {
     argparse::ArgValue<e_constant_net_method> constant_net_method;
     argparse::ArgValue<e_clock_modeling> clock_modeling;
     argparse::ArgValue<bool> exit_before_pack;
+    argparse::ArgValue<bool> strict_checks;
 
     /* Atom netlist options */
     argparse::ArgValue<bool> absorb_buffer_luts;
@@ -142,7 +143,6 @@ struct t_options {
     argparse::ArgValue<int> timing_report_npaths;
     argparse::ArgValue<e_timing_report_detail> timing_report_detail;
     argparse::ArgValue<bool> timing_report_skew;
-
 };
 
 t_options read_options(int argc, const char** argv);
