@@ -704,7 +704,7 @@ signal_list_t *netlist_expand_ast_of_module(ast_node_t* node, char *instance_nam
 				break;
 
 			case MODULE_ITEMS:
-				/* items include: wire, reg, input, outputs, assign, gate, module_instance, always */
+				/* items include: wire, reg, input, output, inout, assign, gate, module_instance, always */
 
 				/* make the symbol table */
 				local_symbol_table_sc = sc_new_string_cache();
@@ -1819,6 +1819,18 @@ void create_symbol_table_for_module(ast_node_t* module_items, char * /*module_na
 						(var_declare->types.variable.is_integer) ||
 						(var_declare->types.variable.is_wire));
 
+					/* inputs and inouts cannot be reg for module ports */
+					if (var_declare->types.variable.is_input && var_declare->types.variable.is_reg)
+					{
+						error_message(NETLIST_ERROR, var_declare->line_number, var_declare->file_number, "%s",
+									"Input cannot be defined as a reg.\n");
+					}
+					else if (var_declare->types.variable.is_inout && var_declare->types.variable.is_reg) 
+					{
+						error_message(NETLIST_ERROR, var_declare->line_number, var_declare->file_number, "%s",
+									"Inout cannot be defined as a reg.\n");
+					}
+
 					/* make the string to add to the string cache */
 					temp_string = make_full_ref_name(NULL, NULL, NULL, var_declare->children[0]->types.identifier, -1);
 					/* look for that element */
@@ -1829,15 +1841,12 @@ void create_symbol_table_for_module(ast_node_t* module_items, char * /*module_na
 						 * output with reg is fine
 						 * output with wire is fine
 						 * Then update the stored string cache entry with information */
-						if ((var_declare->types.variable.is_input)
-								&& (
-									   (((ast_node_t*)local_symbol_table_sc->data[sc_spot])->types.variable.is_reg)
-									|| (((ast_node_t*)local_symbol_table_sc->data[sc_spot])->types.variable.is_wire)
-								)
-						)
+						if ((var_declare->types.variable.is_input) 
+							&& (((ast_node_t*)local_symbol_table_sc->data[sc_spot])->types.variable.is_reg)
+							)
 						{
 							error_message(NETLIST_ERROR, var_declare->line_number, var_declare->file_number, "%s",
-									"Input defined as wire or reg means it is a driver in this module.  Not possible\n");
+									"Input cannot be defined as a reg.\n");
 						}
 						/* MORE ERRORS ... could check for same declaration name ... */
 						else if (var_declare->types.variable.is_output)
@@ -1855,7 +1864,16 @@ void create_symbol_table_for_module(ast_node_t* module_items, char * /*module_na
 						else if (var_declare->types.variable.is_inout)
 						{
 
-							/* TODO Alex what to check for inouts??? */
+							/* TODO Alex */
+
+							/* must make sure that it is not a reg */
+							if ((var_declare->types.variable.is_inout) 
+								&& (((ast_node_t*)local_symbol_table_sc->data[sc_spot])->types.variable.is_reg)
+								)
+								{
+									error_message(NETLIST_ERROR, var_declare->line_number, var_declare->file_number, "%s",
+										"Inout cannot be defined as a reg.\n");	
+								}
 
 						}
 
@@ -1987,18 +2005,20 @@ void create_symbol_table_for_function(ast_node_t* function_items, char * /*funct
 						 * output with reg is fine
 						 * output with wire is fine
 						 * Then update the stored string chache entry with information */
-						if ((var_declare->types.variable.is_input)
-								&& (
-									   (((ast_node_t*)function_local_symbol_table_sc->data[sc_spot])->types.variable.is_reg)
-									|| (((ast_node_t*)function_local_symbol_table_sc->data[sc_spot])->types.variable.is_wire)
-								)
-						)
-						{
-							error_message(NETLIST_ERROR, var_declare->line_number, var_declare->file_number, "%s",
-									"Input defined as wire or reg means it is a driver in this module.  Not possible\n");
-						}
+						 /* TODO Alex */
+						// if ((var_declare->types.variable.is_input)
+						// 		&& (
+						// 			   (((ast_node_t*)function_local_symbol_table_sc->data[sc_spot])->types.variable.is_reg)
+						// 			|| (((ast_node_t*)function_local_symbol_table_sc->data[sc_spot])->types.variable.is_wire)
+						// 		)
+						// )
+						// {
+						// 	error_message(NETLIST_ERROR, var_declare->line_number, var_declare->file_number, "%s",
+						// 			"Input defined as wire or reg means it is a driver in this module.  Not possible\n");
+						// }
 						/* MORE ERRORS ... could check for same declaration name ... */
-						else if (var_declare->types.variable.is_output)
+						//else 
+						if (var_declare->types.variable.is_output)
 						{
 							/* copy all the reg and wire info over */
 							((ast_node_t*)function_local_symbol_table_sc->data[sc_spot])->types.variable.is_output = TRUE;
@@ -2010,12 +2030,15 @@ void create_symbol_table_for_function(ast_node_t* function_items, char * /*funct
 								((ast_node_t*)function_local_symbol_table_sc->data[sc_spot])->types.variable.initial_value = initial_value;
 							}
 						}
-						else if (var_declare->types.variable.is_inout)
-						{
+						// else if (var_declare->types.variable.is_inout)
+						// {
 
-							/* TODO Alex what to check for inouts ??? */
+						// 	/* TODO Alex what to check for inouts ??? */
 
-						}
+						// 	/* error message for inputs is even worse here because function inputs can be
+						// 		anything... what's with this driver stuff????? */
+
+						// }
 						else if ((var_declare->types.variable.is_reg) || (var_declare->types.variable.is_wire) || (var_declare->types.variable.is_integer))
 						{
 							/* copy the output status over */

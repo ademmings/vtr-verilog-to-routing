@@ -500,28 +500,21 @@ ast_node_t *markAndProcessSymbolListWith(ids top_type, ids id, ast_node_t *symbo
 				            symbol_list->children[i]->types.variable.is_input = TRUE;
 							free_whole_tree(symbol_list->children[i]->children[0]);
 				            symbol_list->children[i]->children[0] = (ast_node_t*)modules_inputs_sc->data[sc_spot];
-			            }
+						}
 			            else if ((sc_spot = sc_lookup_string(modules_outputs_sc, symbol_list->children[i]->children[0]->types.identifier)) != -1)
 			            {
 				            symbol_list->children[i]->types.variable.is_output = TRUE;
 							free_whole_tree(symbol_list->children[i]->children[0]);
 				            symbol_list->children[i]->children[0] = (ast_node_t*)modules_outputs_sc->data[sc_spot];
 			            }
-<<<<<<< HEAD
-						if ((found_match == FALSE) && ((sc_spot = sc_lookup_string(modules_inouts_sc, symbol_list->children[i]->children[0]->types.identifier)) != -1))
+						else if ((sc_spot = sc_lookup_string(modules_inouts_sc, symbol_list->children[i]->children[0]->types.identifier)) != -1)
 			            {
 				            symbol_list->children[i]->types.variable.is_inout = TRUE;
 							free_whole_tree(symbol_list->children[i]->children[0]);
 				            symbol_list->children[i]->children[0] = (ast_node_t*)modules_inouts_sc->data[sc_spot];
-				            found_match = TRUE;
 			            }
-
-			            if (found_match == FALSE)
+			            else
 			            {
-=======
-						else
-						{
->>>>>>> master
 				            error_message(PARSE_ERROR, symbol_list->children[i]->line_number, current_parse_file, "No matching input declaration for port %s\n", symbol_list->children[i]->children[0]->types.identifier);
 			            }
 
@@ -568,14 +561,14 @@ ast_node_t *markAndProcessSymbolListWith(ids top_type, ids id, ast_node_t *symbo
 			            /* add this output to the modules string cache */
 			            if ((sc_spot = sc_add_string(modules_outputs_sc, symbol_list->children[i]->children[0]->types.identifier)) == -1)
 			            {
-				            error_message(PARSE_ERROR, symbol_list->children[i]->children[0]->line_number, current_parse_file, "Module already has input with this name %s\n", symbol_list->children[i]->children[0]->types.identifier);
+				            error_message(PARSE_ERROR, symbol_list->children[i]->children[0]->line_number, current_parse_file, "Module already has output with this name %s\n", symbol_list->children[i]->children[0]->types.identifier);
 			            }
 			            /* store the data which is an idx here */
 			            modules_outputs_sc->data[sc_spot] = (void*)symbol_list->children[i];
 			            break;
 		            case INOUT:
 			            symbol_list->children[i]->types.variable.is_inout = TRUE;
-			            error_message(PARSE_ERROR, symbol_list->children[i]->children[0]->line_number, current_parse_file, "Odin does not handle inouts (%s)\n", symbol_list->children[i]->children[0]->types.identifier);
+			           // error_message(PARSE_ERROR, symbol_list->children[i]->children[0]->line_number, current_parse_file, "Odin does not handle inouts (%s)\n", symbol_list->children[i]->children[0]->types.identifier);
 						// TODO Alex
 						if ((sc_spot = sc_add_string(modules_inouts_sc, symbol_list->children[i]->children[0]->types.identifier)) == -1)
 			            {
@@ -600,8 +593,6 @@ ast_node_t *markAndProcessSymbolListWith(ids top_type, ids id, ast_node_t *symbo
         }
         else if(top_type == FUNCTION) {
 
-
-
                 switch(id)
 		        {
 			        case PORT:
@@ -621,21 +612,14 @@ ast_node_t *markAndProcessSymbolListWith(ids top_type, ids id, ast_node_t *symbo
 							free_whole_tree(symbol_list->children[i]->children[0]);
 					        symbol_list->children[i]->children[0] = (ast_node_t*)functions_outputs_sc->data[sc_spot];
 				        }
-<<<<<<< HEAD
-
-						if ((found_match == FALSE) && ((sc_spot = sc_lookup_string(functions_inouts_sc, symbol_list->children[i]->children[0]->types.identifier)) != -1))
+						else if ((sc_spot = sc_lookup_string(functions_inouts_sc, symbol_list->children[i]->children[0]->types.identifier)) != -1)
 			            {
 				            symbol_list->children[i]->types.variable.is_inout = TRUE;
 							free_whole_tree(symbol_list->children[i]->children[0]);
 				            symbol_list->children[i]->children[0] = (ast_node_t*)functions_inouts_sc->data[sc_spot];
-				            found_match = TRUE;
 			            }
-
-				        if (found_match == FALSE)
-=======
 				        else
->>>>>>> master
-				        {
+						{
 					        error_message(PARSE_ERROR, symbol_list->children[i]->line_number, current_parse_file, "No matching input declaration for port %s\n", symbol_list->children[i]->children[0]->types.identifier);
 				        }
 
@@ -689,7 +673,7 @@ ast_node_t *markAndProcessSymbolListWith(ids top_type, ids id, ast_node_t *symbo
 				        break;
 			        case INOUT:
 				        symbol_list->children[i]->types.variable.is_inout = TRUE;
-				        error_message(PARSE_ERROR, symbol_list->children[i]->children[0]->line_number, current_parse_file, "Odin does not handle inouts (%s)\n", symbol_list->children[i]->children[0]->types.identifier);
+				       // error_message(PARSE_ERROR, symbol_list->children[i]->children[0]->line_number, current_parse_file, "Odin does not handle inouts (%s)\n", symbol_list->children[i]->children[0]->types.identifier);
 				        // TODO Alex
 						if ((sc_spot = sc_add_string(functions_inouts_sc, symbol_list->children[i]->children[0]->types.identifier)) == -1)
 			            {

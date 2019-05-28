@@ -224,14 +224,17 @@ defparam_declaration:
 
 input_declaration:
 	vINPUT variable_list ';'	{$$ = markAndProcessSymbolListWith(MODULE,INPUT, $2);}
+	| vINPUT net_declaration	{$$ = markAndProcessSymbolListWith(MODULE,INPUT, $2);}
 	;
 
 output_declaration:
 	vOUTPUT variable_list ';'					{$$ = markAndProcessSymbolListWith(MODULE,OUTPUT, $2);}
+	| vOUTPUT net_declaration					{$$ = markAndProcessSymbolListWith(MODULE,OUTPUT, $2);}
 	;
 
 inout_declaration:
 	vINOUT variable_list ';'					{$$ = markAndProcessSymbolListWith(MODULE,INOUT, $2);}
+	| vINOUT net_declaration					{$$ = markAndProcessSymbolListWith(MODULE,INOUT, $2);}
 	;
 
 net_declaration:
